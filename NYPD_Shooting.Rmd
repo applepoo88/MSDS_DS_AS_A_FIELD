@@ -1,0 +1,201 @@
+---
+title: "NYPD_Shooting"
+author: "S. May"
+date: "6 12 2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## NYPD Shooting Incident Data Report
+
+Import, tidy and analyze the dataset 'NYPD Shooting Incident Data (Historic)' from the source >https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic<
+
+## Libraries
+```{r libs, message=FALSE}
+library(tidyverse)
+library(lubridate)
+```
+
+## 1. reading in the data sets
+
+```{r get_nypd_data}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+```
+
+## 2. importing
+
+```{r import_data, message = FALSE}
+NYPD_Shooting <- read_csv(url_in)
+```
+
+
+## 3. tidying
+
+- delete X_COORD_CD, Y_COORD_CD, Longitude, Latitude, Lon_Lat
+
+```{r tidy_nypd_data}
+NYPD_Shooting <- NYPD_Shooting %>%
+  select(-c(X_COORD_CD, Y_COORD_CD, Longitude, Latitude, Lon_Lat))
+```
+\newpage
+## 4. transforming
+
+- convert date column type from character to date
+- prepare data for the model (total shootings & murders)
+
+```{r transform_nypd_data}
+NYPD_Shooting <- NYPD_Shooting %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+
+Total_Shootings_Yearly <- NYPD_Shooting %>% 
+  mutate(YEAR = year(round_date(OCCUR_DATE, "year"))) %>% 
+  group_by(YEAR) %>% count()
+
+colnames(Total_Shootings_Yearly) <- c("YEAR", "Shootings")
+
+Total_Murders_Yearly <- NYPD_Shooting %>% 
+  filter(STATISTICAL_MURDER_FLAG == TRUE) %>% 
+  mutate(YEAR = year(round_date(OCCUR_DATE, "year"))) %>% 
+  group_by(YEAR) %>% count()
+
+colnames(Total_Murders_Yearly) <- c("YEAR", "Murders")
+
+Yearly <- merge(Total_Shootings_Yearly,Total_Murders_Yearly,by="YEAR")
+```
+
+## 5. analyzing
+
+- Number of shootings grouped by borough
+
+```{r analyze_boro}
+NYPD_Shooting_Boro <- NYPD_Shooting %>%
+  group_by(BORO) %>% 
+  summarize(number_of_shootings=n()) %>%
+  arrange(desc(number_of_shootings))
+
+NYPD_Shooting_Boro
+```
+\newpage
+- Number of shootings grouped by victim's age group
+
+```{r analyze_age}
+NYPD_Shooting_Vic_Age_Group <- NYPD_Shooting %>%
+  group_by(VIC_AGE_GROUP) %>% 
+  summarize(number_of_shootings=n())
+
+NYPD_Shooting_Vic_Age_Group
+```
+
+- Number of shootings grouped by victim's sex
+
+```{r analyze_sex}
+NYPD_Shooting_Vic_Sex <- NYPD_Shooting %>%
+  group_by(VIC_SEX) %>% 
+  summarize(number_of_shootings=n()) %>%
+  arrange(desc(number_of_shootings))
+
+NYPD_Shooting_Vic_Sex
+```
+
+- Number of shootings grouped by victim's race
+
+```{r analyze_race}
+NYPD_Shooting_Vic_Race <- NYPD_Shooting %>%
+  group_by(VIC_RACE) %>% 
+  summarize(number_of_shootings=n()) %>%
+  arrange(desc(number_of_shootings))
+
+NYPD_Shooting_Vic_Race
+```
+
+\newpage
+## 6. visualizing
+
+- Number of shootings depending on borough
+
+```{r visualize_boro}
+NYPD_Shooting_Boro %>%
+  ggplot(aes(BORO,number_of_shootings))+
+  geom_col(aes(fill = BORO)) +
+  labs(title="shootings depending on borough",
+        y="# of shootings", x= "borough")+
+  geom_text(aes(label = round(number_of_shootings, 1)), nudge_y= -3, color="black")
+```
+
+\newpage
+- Number of shootings depending on victim age group
+
+```{r visualize_age}
+NYPD_Shooting_Vic_Age_Group %>%
+  ggplot(aes(VIC_AGE_GROUP, y = number_of_shootings, fill = VIC_AGE_GROUP)) +
+  geom_bar(stat = "identity") +
+  ylab("# of shootings") +
+  xlab("Victim Age Group") +
+  ggtitle("Number of Shooting Incidents Grouped By Victim Age Group") +
+  theme(legend.position = "none")
+```
+
+\newpage
+- Number of shootings depending on victim sex
+
+```{r visualize_sex}
+NYPD_Shooting_Vic_Sex %>%
+  ggplot(aes(VIC_SEX, y = number_of_shootings, fill = VIC_SEX)) +
+  geom_bar(stat = "identity") +
+  ylab("# of shootings") +
+  xlab("Victim Sex") +
+  ggtitle("Number of Shooting Incidents Grouped By Victim Sex") +
+  theme(legend.position = "none")
+```
+
+\newpage
+- Number of shootings depending on victim race
+
+```{r visualize_race}
+NYPD_Shooting_Vic_Race %>%
+  ggplot(aes(VIC_RACE, y = number_of_shootings, fill = VIC_RACE)) +
+  coord_flip() +
+  geom_bar(stat = "identity") +
+  ylab("# of shootings") +
+  xlab("Victim Race") +
+  ggtitle("Number of Shooting Incidents Grouped By Victim Race") +
+  theme(legend.position = "none")
+```
+
+
+\newpage
+## 7. modeling
+
+Model the linear correlation between `MURDERS` and  `Shootings` by using the `lm()` function.
+
+``` {r modeling_data}
+mod <- lm(Shootings ~ Murders, data = Yearly)
+summary(mod)
+Yearly %>% slice_min(Shootings)
+Yearly %>% slice_max(Shootings)
+Yearly_pred <- Yearly %>% 
+  mutate(pred = predict(mod))
+Yearly_pred %>% ggplot() + 
+  geom_point(aes(x = Murders, y = Shootings), color = "blue") +
+  geom_point(aes(x = Murders, y = pred), color = "red")
+```
+
+## 8. Conclusion & Identifying Bias
+
+To conclude, the data showed us that, in absolute numbers, Brooklyn has the highest number of shootings. Probably, we have to put this number in relation to borough citizens to show which borough is the "most dangerous".
+
+We are able to see that the majority of victims are black, male and / or between 18 - 44 years old.
+
+My personal bias regarding this topic was influenced by news and I thought most shooting incidents would occur in the Bronx along with thinking most shooting incidents would be male.
+
+\newpage
+
+## Session Info
+```{r session_info}
+sessionInfo()
+```
